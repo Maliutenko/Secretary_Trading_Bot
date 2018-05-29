@@ -1,0 +1,291 @@
+//+------------------------------------------------------------------+
+//|                                                    Secretary.mq4 |
+//|                                 Copyright 2018, Anton Maliutenko |
+//|                          https://www.mql5.com/ru/users/maluktony |
+//+------------------------------------------------------------------+
+#property copyright "Copyright 2018, Anton Maliutenko"
+#property link      "https://www.mql5.com/ru/users/maluktony"
+#property version   "1.00"
+#property strict
+
+extern double TradingLevel = 0.00025;
+extern int StopLoss = 50;
+extern int TakeProfit = 500;
+extern int Magic_Number = 10000;
+extern int StartWork = 8;
+extern int EndWork = 21;
+
+double mainTradeLine;
+double priceOpenBuy;
+double priceOpenSell;
+double lot;
+bool work;
+int accountChange = 1;
+string symb;
+//+------------------------------------------------------------------+
+//| Expert initialization function                                   |
+//+------------------------------------------------------------------+
+int OnInit()
+  {
+//---
+   
+//---
+   return(INIT_SUCCEEDED);
+  }
+//+------------------------------------------------------------------+
+//| Expert deinitialization function                                 |
+//+------------------------------------------------------------------+
+void OnDeinit(const int reason)
+  {
+//---
+   
+  }
+//+------------------------------------------------------------------+
+//| Expert tick function                                             |
+//+------------------------------------------------------------------+
+void OnTick()
+  {
+   //---Установка времени работы эксперта
+   if(Hour() >= StartWork && Hour() < EndWork)                        //проверка установленного времени
+     {
+      work = true;                                                    //продолжаем работу OnTick()
+     }
+   else
+     {
+      work = false;                                                   //прекращаем работу
+      return;                                                         //выходим из OnTick()
+     }
+   //---Установка торгового уровня
+   mainTradeLine = iOpen(NULL,PERIOD_D1,0);                           //присвоить переменной значение OPEN начала дня
+   priceOpenBuy = mainTradeLine + TradingLevel;
+   priceOpenSell = mainTradeLine - TradingLevel;
+   HLineCreate(ChartID(),"main_line",mainTradeLine); 
+   HLineCreate(ChartID(),"buy_line",priceOpenBuy,0,clrBlue,STYLE_SOLID,1);
+   HLineCreate(ChartID(),"sell_line",priceOpenSell,0,clrOrange,STYLE_SOLID,1);  
+   
+   //---Проверка баланса торгового счета и запуск функции расчета лота по необходимости
+   int x, y;                                                          //переменные для расчетов
+   y = AccountBalance();                                              //присваиваем значение размера торгового баланса
+   x = y % 500;                                                       //присваиваем остаток от деления
+   if(accountChange != x)                                             //если осаток от деления изменился, то присвоить новое значение и запустить фуекцию расчета лота
+     {
+      accountChange = x;                                              //присваиваем новое значение
+      SelectionLot();                                                 //вычисление нового значения лота
+      Print("Lot is changed to " + DoubleToString(lot));              
+     } 
+     
+   //---Учёт ордеров
+   symb = Symbol();                                                   // Название фин.инстр. 
+   int sell_order_open = 0;
+   int buy_order_open = 0;
+   for(int i = 1; i <= OrdersTotal(); i++)                            // Цикл перебора ордеров
+     {
+      if(OrderSelect(i - 1, SELECT_BY_POS)==true)                     // Если есть следующий
+        {                                                             // Анализ ордеров:
+         if(OrderSymbol() != symb) continue;                          // Не наш фин. инструм
+         if(OrderType() == 2 || OrderType() == 4 || OrderType() == 0)
+           {
+            buy_order_open++;
+           }
+         if(OrderType() == 1 || OrderType() == 3 || OrderType() == 5)
+           {
+            sell_order_open++;
+           }
+        }
+     }
+     
+   //---Торговые критерии
+   if(buy_order_open != 0 && sell_order_open !=0 ) return;
+     
+   //--Открытие ордеров
+   if(Ask - 0.00010 > priceOpenBuy && buy_order_open == 0)
+      {
+        OpenBuyLimit(priceOpenBuy);
+      }
+   if(Ask + 0.00010 < priceOpenBuy && buy_order_open == 0)
+      {
+        OpenBuyStop(priceOpenBuy);
+      }
+   if(Bid - 0.00010 > priceOpenSell && sell_order_open == 0)
+      {
+        OpenSellStop(priceOpenSell);
+      }
+   if(Bid + 0.00010 < priceOpenSell && sell_order_open == 0)
+      {
+        OpenSellLimit(priceOpenSell);
+      }
+                      
+
+   
+  }
+//+------------------------------------------------------------------+
+//---Функция прорисовки торговой линии
+void HLineCreate(long                  chart_ID,                       // ID графика 
+                 string                name,                           // имя линии 
+                 double                price,                          // цена линии 
+                 const int             sub_window=0,                   // номер подокна 
+                 const color           clr=clrLime,                    // цвет линии 
+                 const ENUM_LINE_STYLE style=STYLE_SOLID,              // стиль линии 
+                 const int             width=2,                        // толщина линии 
+                 const bool            back=false,                     // на заднем плане 
+                 const bool            selection=false,                // выделить для перемещений 
+                 const bool            hidden=false,                   // скрыт в списке объектов 
+                 const long            z_order=0)                      // приоритет на нажатие мышью 
+  {
+//сбросим значение ошибки 
+   ResetLastError();
+//создадим горизонтальную линию 
+   if(ObjectFind(ChartID(),name) == -1)
+     {
+      ObjectCreate(chart_ID,name,OBJ_HLINE,sub_window,0,price);
+     }
+   ObjectSetDouble(chart_ID,name,OBJPROP_PRICE,price);
+//установим цвет линии 
+   ObjectSetInteger(chart_ID,name,OBJPROP_COLOR,clr);
+//установим стиль отображения линии 
+   ObjectSetInteger(chart_ID,name,OBJPROP_STYLE,style);
+//установим толщину линии 
+   ObjectSetInteger(chart_ID,name,OBJPROP_WIDTH,width);
+//отобразим на переднем (false) или заднем (true) плане 
+   ObjectSetInteger(chart_ID,name,OBJPROP_BACK,back);
+//включим (true) или отключим (false) режим перемещения линии мышью 
+//при создании графического объекта функцией ObjectCreate, по умолчанию объект 
+//нельзя выделить и перемещать. Внутри же этого метода параметр selection 
+//по умолчанию равен true, что позволяет выделять и перемещать этот объект 
+   ObjectSetInteger(chart_ID,name,OBJPROP_SELECTABLE,selection);
+   ObjectSetInteger(chart_ID,name,OBJPROP_SELECTED,selection);
+//скроем (true) или отобразим (false) имя графического объекта в списке объектов 
+   ObjectSetInteger(chart_ID,name,OBJPROP_HIDDEN,hidden);
+//установим приоритет на получение события нажатия мыши на графике 
+   ObjectSetInteger(chart_ID,name,OBJPROP_ZORDER,z_order);
+  }
+//---Функция выбора лота                                                 
+void SelectionLot()
+  {
+   if(AccountBalance() <= 1000.00)
+      lot = 0.1;
+   if(AccountBalance() > 1000.00 && AccountBalance() <= 1500.00)
+      lot = 0.2;
+   if(AccountBalance() > 1500.00 && AccountBalance() <= 2000.00)
+      lot = 0.3;
+   if(AccountBalance() > 2000.00 && AccountBalance() <= 2500.00)
+      lot = 0.4;
+   if(AccountBalance() > 2500.00 && AccountBalance() <= 3000.00)
+      lot = 0.5;
+   if(AccountBalance() > 3000.00 && AccountBalance() <= 3500.00)
+      lot = 0.6;
+   if(AccountBalance() > 3500.00 && AccountBalance() <= 4000.00)
+      lot = 0.7;
+   if(AccountBalance() > 4000.00 && AccountBalance() <= 4500.00)
+      lot = 0.8;
+   if(AccountBalance() > 4500.00 && AccountBalance() <= 5000.00)
+      lot = 0.9;
+   if(AccountBalance() > 5000.00)
+      lot = 1.0;
+   return;
+  }
+//---Функция открытия ордера
+int OrderSendCustom(string   symbol,              // символ 
+                    int      cmd,                 // торговая операция 
+                    double   volume,              // количество лотов 
+                    double   price,               // цена 
+                    int      slippage,            // проскальзывание 
+                    double   stoploss,            // stop loss 
+                    double   takeprofit,          // take profit 
+                    string   comment,             // комментарий 
+                    int      magic,               // идентификатор 
+                    datetime expiration,          // срок истечения ордера 
+                    color    arrow_color)         // цвет 
+  {
+   int error = GetLastError();
+   error = 0;
+   bool exitLoop = false;
+   int ticket = -1;
+   int retry = 3;                                 //количество попыток открыть ордер
+   int count = 0;                                 //счетчик количества попыток
+
+   while(!exitLoop)
+     {
+      ticket = OrderSend(symbol,cmd,volume,price,slippage,stoploss,takeprofit,comment,magic,expiration,arrow_color);
+      error = GetLastError();
+
+      switch(error)
+        {
+         case ERR_NO_ERROR: exitLoop = true; break;
+         case ERR_SERVER_BUSY:
+         case ERR_NO_CONNECTION:
+         case ERR_BROKER_BUSY:
+         case ERR_TRADE_CONTEXT_BUSY:
+            count++;
+            break;
+         case ERR_INVALID_PRICE:
+         case ERR_PRICE_CHANGED:
+         case ERR_OFF_QUOTES:
+         case ERR_REQUOTE:
+            RefreshRates();
+            continue;
+         default: exitLoop = true; break;
+        }
+      if(count > retry) exitLoop = true;
+      if(!exitLoop)
+        {
+         Sleep(1000);
+         RefreshRates();
+        }
+      else
+        {
+         if(error == ERR_TRADE_NOT_ALLOWED) MessageBox("Auto-Trading must be enabled or delete the advisor from chart",NULL,0);
+         if(error != ERR_NO_ERROR) Print("Error : "+IntegerToString(error));
+        }
+      if(error == ERR_NO_ERROR)
+        {
+         return(ticket);
+        }
+     }
+   Print("Error open order after " + IntegerToString(count) + " tries");
+   return(-1);
+  } 
+//---Открытие BUYSTOP
+void OpenBuyStop(double openPrice)
+  {
+    double SL=0;
+    double TP=0;
+    
+    TP = NormalizeDouble(openPrice + TakeProfit*Point,Digits);
+    SL = NormalizeDouble(openPrice - StopLoss*Point,Digits);
+    
+    int ticket = OrderSendCustom(Symbol(), OP_BUYSTOP, lot, priceOpenBuy, 10, SL, TP, "Order opened by advisor", Magic_Number, 0, clrGreen);
+  }
+//---Открытие BUYLIMIT
+void OpenBuyLimit(double openPrice)
+  {
+    double SL=0;
+    double TP=0;
+    
+    TP = NormalizeDouble(openPrice + TakeProfit*Point,Digits);
+    SL = NormalizeDouble(openPrice - StopLoss*Point,Digits);
+    
+    int ticket = OrderSendCustom(Symbol(), OP_BUYLIMIT, lot, priceOpenBuy, 10, SL, TP, "Order opened by advisor", Magic_Number, 0, clrGreen);
+  }
+//---Открытие SELLSTOP
+void OpenSellStop(double openPrice)
+  {
+    double SL=0;
+    double TP=0;
+    
+    TP = NormalizeDouble(openPrice - TakeProfit*Point,Digits);
+    SL = NormalizeDouble(openPrice + StopLoss*Point,Digits);
+    
+    int ticket = OrderSendCustom(Symbol(), OP_SELLSTOP, lot, priceOpenSell, 10, SL, TP, "Order opened by advisor", Magic_Number, 0, clrGreen);
+  }
+//---Открытие SELLLIMIT
+void OpenSellLimit(double openPrice)
+  {
+    double SL=0;
+    double TP=0;
+    
+    TP = NormalizeDouble(openPrice - TakeProfit*Point,Digits);
+    SL = NormalizeDouble(openPrice + StopLoss*Point,Digits);
+    
+    int ticket = OrderSendCustom(Symbol(), OP_SELLLIMIT, lot, priceOpenSell, 10, SL, TP, "Order opened by advisor", Magic_Number, 0, clrGreen);
+  }
